@@ -1,25 +1,14 @@
-"""Baselines, models, and calibration that never sees the test season.
+"""Baselines, the two models, and isotonic calibration.
 
-Three dumb baselines come first, because they decide whether there is a project. The
-strongest is ``prior_injuries``: injury history is the best-established predictor in
-the literature, and a gradient booster that cannot beat *counting a player's injuries
-last year* has not earned its place. That comparison is the point of including it, and
-D-009 already committed to reporting the answer either way.
+The baselines matter. If a gradient booster cannot beat counting how many
+injuries a player had last year then it has not earned its place, so that
+comparison is built in rather than left out.
 
-**Everything is calibrated, including the baselines.** A raw ``minutes_28d`` value is
-not a probability, so Brier and ECE would be meaningless against it. Putting every
-scorer through the same isotonic step makes the comparison fair on calibration as well
-as on ranking.
+Baselines get calibrated too, otherwise Brier and calibration error would mean
+nothing against a raw minutes count.
 
-**Where the calibration slice comes from** (invariant 5, the subtlest leak here). The
-last ``CALIBRATION_FRACTION`` of *weeks inside the training window* is held out, the
-model is fitted on the earlier part, and isotonic is fitted on the held-out part. The
-split is temporal rather than random, so the calibration data sits between the fitting
-data and the test season exactly as it would in deployment. Nothing the test season
-touches is ever involved.
-
-No resampling anywhere (locked decision 5). Imbalance is handled by choosing metrics
-that survive it, not by editing the data.
+The calibrator is fitted on the last 25% of the training weeks, so it never sees
+anything from the test season. No resampling anywhere.
 """
 
 from typing import Protocol
@@ -36,20 +25,20 @@ from sklearn.preprocessing import StandardScaler
 
 Floats = NDArray[np.float64]
 
-#: Share of training *weeks* reserved for fitting the calibrator.
+# Share of training *weeks* reserved for fitting the calibrator.
 CALIBRATION_FRACTION = 0.25
 
-#: Minimum calibration rows behind an isotonic step before its value is trusted.
-#: Isotonic is a step function and its topmost step is often supported by a handful of
-#: points; with `out_of_bounds="clip"` everything above it inherits that value. On real
-#: data that produced 28 rows predicted at exactly 1.000 whose actual rate was 3.57%.
-#: The aggregate metrics barely moved — 0.05% of rows — but a squad page showing a
-#: player at "100% risk" is not recoverable, so unsupported top steps are capped.
+# Minimum calibration rows behind an isotonic step before its value is trusted.
+# Isotonic is a step function and its topmost step is often supported by a handful of
+# points; with out_of_bounds="clip" everything above it inherits that value. On real
+# data that produced 28 rows predicted at exactly 1.000 whose actual rate was 3.57%.
+# The aggregate metrics barely moved, 0.05% of rows, but a squad page showing a
+# player at "100% risk" is not recoverable, so unsupported top steps are capped.
 MIN_STEP_SUPPORT = 50
 
-#: Features fed to the models. Keys are excluded; ``suspensions_365d`` is excluded
-#: because this label source contains no suspensions at all (D-016), making it a
-#: constant-zero column that would only clutter the SHAP plots.
+# Features fed to the models. Keys are excluded; suspensions_365d is excluded
+# because this label source contains no suspensions at all, making it a
+# constant-zero column that would only clutter the SHAP plots.
 FEATURE_COLUMNS = [
     "minutes_7d",
     "minutes_14d",
@@ -111,15 +100,15 @@ class ConstantBaseline:
 class ColumnBaseline:
     """Ranks by a single feature. No fitting beyond remembering the column.
 
-    ``minutes_28d`` asks whether recent workload alone predicts unavailability.
-    ``injury_absences_365d`` asks whether injury history alone does — the one to beat.
+    minutes_28d asks whether recent workload alone predicts unavailability.
+    injury_absences_365d asks whether injury history alone does, the one to beat.
     """
 
     def __init__(self, column: str) -> None:
         self.column = column
 
     def fit(self, features: pd.DataFrame, labels: Floats) -> "ColumnBaseline":  # noqa: ARG002
-        """Nothing to learn — the column *is* the model. Signature set by the protocol."""
+        """Nothing to learn, the column *is* the model. Signature set by the protocol."""
         return self
 
     def score(self, features: pd.DataFrame) -> Floats:
@@ -128,7 +117,7 @@ class ColumnBaseline:
 
 
 class SklearnScorer:
-    """Adapts an sklearn classifier to the :class:`Scorer` protocol."""
+    """Adapts an sklearn classifier to the Scorer protocol."""
 
     def __init__(self, estimator: object) -> None:
         self.estimator = estimator
@@ -145,16 +134,16 @@ class SklearnScorer:
 class CalibratedScorer:
     """A scorer plus an isotonic calibrator fitted on a temporal slice of training.
 
-    The slice is the last ``fraction`` of training weeks. Splitting by week rather
+    The slice is the last fraction of training weeks. Splitting by week rather
     than by row keeps whole player-weeks together and keeps the calibration data
-    strictly later than the fitting data — the same ordering deployment would see.
+    strictly later than the fitting data, the same ordering deployment would see.
     """
 
     def __init__(self, scorer: Scorer, *, fraction: float = CALIBRATION_FRACTION) -> None:
         self.scorer = scorer
         self.fraction = fraction
         self.calibrator: IsotonicRegression | None = None
-        #: Highest calibrated value backed by enough calibration rows to believe.
+        # Highest calibrated value backed by enough calibration rows to believe.
         self.ceiling: float = 1.0
 
     def fit(self, features: pd.DataFrame, labels: Floats, weeks: pd.Series) -> "CalibratedScorer":
@@ -178,7 +167,7 @@ class CalibratedScorer:
         return self
 
     def _supported_ceiling(self, calibration_scores: Floats) -> float:
-        """Highest isotonic step backed by at least ``MIN_STEP_SUPPORT`` rows."""
+        """Highest isotonic step backed by at least MIN_STEP_SUPPORT rows."""
         if self.calibrator is None:
             return 1.0
         fitted = pd.Series(self.calibrator.predict(calibration_scores))
@@ -202,7 +191,7 @@ class CalibratedScorer:
 def build_models() -> dict[str, Scorer]:
     """Every scorer to be reported, baselines first.
 
-    Library defaults throughout: no hyperparameter search (D-006). An honest search
+    Library defaults throughout: no hyperparameter search. An honest search
     needs a third nested split and would buy less than the calibration work does.
     """
     logistic = Pipeline(

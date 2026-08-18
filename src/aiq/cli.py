@@ -1,9 +1,7 @@
-"""Command line entry points. Every number in the README comes from these.
+"""Command line entry points.
 
-The pipeline is linear and each stage writes its output to disk, so a stage can be
-re-run without repeating the ones before it. ``export`` is the only command that
-touches the network or the corpus; everything after it runs offline from
-``data/raw/`` (invariant 1).
+Each stage writes its output to disk, so you can rerun one without redoing the
+ones before it. Only "export" touches the database or the network.
 """
 
 import sys
@@ -36,11 +34,11 @@ PANEL = Path("data/panel")
 FEATURES = Path("data/features")
 ARTIFACTS = Path("artifacts")
 
-#: Leagues carried into modelling (D-017). Championship and ISL excluded on
-#: Transfermarkt reporting depth, not on anything about the football.
+# Leagues carried into modelling. Championship and ISL excluded on
+# Transfermarkt reporting depth, not on anything about the football.
 MODELLED_LEAGUES = [8, 82, 564]
 
-#: Modelling window start. Minutes coverage is ~95% from 2022 and ~99.9% from 2023.
+# Modelling window start. Minutes coverage is ~95% from 2022 and ~99.9% from 2023.
 WINDOW_START = "2022-07-01"
 
 
@@ -205,7 +203,7 @@ def train(label: str = typer.Option("label_injury", help="label_injury or label_
 
 @app.command()
 def reliability() -> None:
-    """Write the reliability diagram — predicted probability against observed rate.
+    """Write the reliability diagram, predicted probability against observed rate.
 
     The chart the calibration claim rests on. Fitted on the honest temporal split, so
     the curve describes performance on a season the model never saw.
@@ -240,7 +238,7 @@ def reliability() -> None:
     axis.set_ylim(0, limit)
     axis.set_xlabel("predicted probability")
     axis.set_ylabel("observed rate")
-    axis.set_title(f"Reliability — {fold.name} (base rate {base:.2%})")
+    axis.set_title(f"Reliability, {fold.name} (base rate {base:.2%})")
     axis.legend()
     figure.tight_layout()
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
@@ -253,13 +251,13 @@ def reliability() -> None:
 def predict() -> None:
     """Score the most recent season and write artifacts/predictions.parquet.
 
-    The Streamlit page reads this and nothing else — no model is fitted at request
-    time (architecture.md §8). Trained on every season before the one it scores, so
+    The Streamlit page reads this and nothing else, no model is fitted at request
+    time. Trained on every season before the one it scores, so
     the numbers on screen are out-of-sample.
 
-    **Logistic regression, deliberately.** For a linear model the local explanation is
+    Logistic regression, deliberately. For a linear model the local explanation is
     exact and free: contribution_j = coefficient_j x standardised_value_j, and those
-    contributions sum to the log-odds. A tree model would need `shap` to say anything
+    contributions sum to the log-odds. A tree model would need shap to say anything
     as precise, and an approximate explanation of a model this weak would be worse than
     an exact one. Gradient boosting stays the better-calibrated model and both are in
     the metrics table.
@@ -305,7 +303,7 @@ def predict() -> None:
 
 @app.command()
 def sensitivity() -> None:
-    """Both sensitivity analyses: the `unknown injury` call, and invisible European load."""
+    """Both sensitivity analyses: the unknown injury call, and invisible European load."""
     from aiq.sensitivity import european_team_seasons, flag_european, rate_by_minutes_band
 
     warnings.filterwarnings("ignore")
@@ -373,7 +371,7 @@ def report() -> None:
 
     honest = grouped[grouped.splitter == "honest_temporal"].set_index("model")
     naive = grouped[grouped.splitter == "naive_random"].set_index("model")
-    typer.echo("\nnaive-vs-honest gap (the instrument, not the result — see D-018):")
+    typer.echo("\nnaive vs honest gap:")
     for name in ["logistic_regression", "gradient_boosting"]:
         if name in honest.index and name in naive.index:
             gap = (naive.loc[name].pr_auc - honest.loc[name].pr_auc) / honest.loc[name].pr_auc

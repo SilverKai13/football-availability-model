@@ -1,14 +1,7 @@
-"""Single-page squad risk view. Reads precomputed parquet; fits nothing.
+"""Squad risk page. Reads the parquet written by "aiq.cli predict", fits nothing.
 
-The audience is a physio in a Monday meeting, so the design rules are narrow:
-
-- **Never show a probability without the base rate next to it.** 4% means nothing on
-  its own; "4%, typical is 2%" means something.
-- **Say what the model cannot do**, on screen, not in a footnote. It does not beat
-  counting a player's injuries last year on the metric that matters operationally, and
-  a page that hid that would be misleading in exactly the way this project is about.
-- **Explanations are exact, not approximate.** The served model is logistic regression,
-  so each contribution is coefficient x standardised value and they sum to the log-odds.
+Two rules I tried to stick to: always show the base rate next to a probability,
+and put what the model cannot do on the page rather than hiding it in a readme.
 """
 
 from pathlib import Path
@@ -19,7 +12,7 @@ import streamlit as st
 PREDICTIONS = Path("artifacts/predictions.parquet")
 TEAMS = Path("data/raw/teams.parquet")
 
-#: Shortlist length, matching the precision@5 reported in the README.
+# Shortlist length, matching the precision@5 reported in the README.
 SHORTLIST = 5
 
 POSITIONS = {24: "GK", 25: "DEF", 26: "MID", 27: "ATT"}
@@ -58,7 +51,7 @@ READABLE = {
 @st.cache_data
 def load() -> tuple[pd.DataFrame, dict[int, str]]:
     if not PREDICTIONS.exists():
-        st.error("artifacts/predictions.parquet is missing — run `python -m aiq.cli predict`.")
+        st.error("artifacts/predictions.parquet not found. Run: python -m aiq.cli predict")
         st.stop()
     frame = pd.read_parquet(PREDICTIONS)
     frame["monday"] = pd.to_datetime(frame.monday)
@@ -74,19 +67,19 @@ def main() -> None:
     frame, team_names = load()
     base_rate = float(frame.label_injury.mean())
 
-    st.title("AvailabilityIQ — squad availability risk")
+    st.title("AvailabilityIQ")
     st.caption(
-        "Probability that a player becomes unavailable for selection in the next seven days. "
-        "Season 2024/25, scored out-of-sample by a model trained only on earlier seasons."
+        "Chance a player becomes unavailable for selection in the next 7 days. "
+        "Season 2024/25, scored by a model trained only on earlier seasons."
     )
 
     st.warning(
-        "**Read this before using any number on this page.** On the metric that matches how a "
-        "shortlist is actually used, this model does not beat simply counting a player's "
-        "injuries over the last year. Its ranking is weak. What it does do well is stay "
-        "calibrated: when it says 4%, roughly 4% of those weeks end in an absence. Treat it as "
-        "one weak input, not a recommendation — and see the README for what it cannot see, "
-        "which includes all training load and every European and international fixture."
+        "Worth knowing before you use any of these numbers. On precision@5, which is the "
+        "closest thing to how a shortlist actually gets used, this model does not beat just "
+        "counting how many injuries a player had last year. The ranking is weak. What it does "
+        "get right is the scale: when it says 4%, about 4% of those weeks end in an absence. "
+        "It also cannot see training load, or any European or international fixtures. Treat it "
+        "as one weak input rather than a recommendation."
     )
 
     teams = sorted(frame.team_id.unique(), key=lambda t: team_names.get(t, str(t)))
@@ -113,15 +106,15 @@ def main() -> None:
     left, right = st.columns([3, 2], gap="large")
 
     with left:
-        st.subheader(f"{team_names.get(team, team)} — week of {pd.Timestamp(monday):%d %b %Y}")
+        st.subheader(f"{team_names.get(team, team)}, week of {pd.Timestamp(monday):%d %b %Y}")
         st.caption(
-            f"{len(squad)} players in the risk set. Players already unavailable that Monday are "
-            "absent from this list by construction — they cannot become unavailable."
+            f"{len(squad)} players in the risk set. Anyone already unavailable on the Monday "
+            "is left out, since they cannot become unavailable."
         )
         table = pd.DataFrame(
             {
                 "Player": squad.player_name.fillna("unknown"),
-                "Pos": squad.position_id.map(POSITIONS).fillna("—"),
+                "Pos": squad.position_id.map(POSITIONS).fillna("?"),
                 "Risk": squad.risk.map(lambda v: f"{v:.2%}"),
                 "vs base": squad.ratio.map(lambda v: f"{v:.1f}x"),
                 "Became unavailable": squad.label_injury.map({1: "yes", 0: ""}),
@@ -132,9 +125,9 @@ def main() -> None:
         flagged = squad.head(SHORTLIST)
         caught = int(flagged.label_injury.sum())
         st.caption(
-            f"Top {SHORTLIST} flagged this week: **{caught}** actually became unavailable. "
-            f"Across the season this averages 0.15 per squad-week against 0.10 by chance — "
-            "about two extra per club per season."
+            f"Top {SHORTLIST} flagged this week: {caught} actually became unavailable. "
+            "Over a season that works out at about 0.15 per squad-week, against 0.10 if you "
+            "picked 5 names at random."
         )
 
     with right:
@@ -158,8 +151,8 @@ def main() -> None:
         }
         series = pd.Series(contributions).sort_values(key=abs, ascending=False).head(8)
         st.caption(
-            "Exact contributions to the log-odds — coefficient x standardised value. "
-            "Bars right of zero push risk up, left of zero push it down."
+            "Contribution to the log-odds (coefficient x standardised value). Bars to the "
+            "right push the risk up, bars to the left push it down."
         )
         st.bar_chart(
             pd.DataFrame(
@@ -168,10 +161,7 @@ def main() -> None:
             ),
             horizontal=True,
         )
-        st.caption(
-            "These explain the model, not the player. A driver here is something the model "
-            "leaned on, which is not the same as a cause."
-        )
+        st.caption("This shows what the model used, which is not the same as what caused anything.")
 
 
 if __name__ == "__main__":

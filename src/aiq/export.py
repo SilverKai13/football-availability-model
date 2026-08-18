@@ -1,13 +1,7 @@
-"""Read-only export of the Sportmonks corpus into ``data/raw/``.
+"""Pulls the tables we need out of the Sportmonks sqlite database.
 
-The corpus ``ppa.sqlite`` belongs to the sibling project ``ppa-data-engine``. It is
-~4 GB, lives inside OneDrive, is single-writer, and its Alembic head moves when that
-project branches. All three have already broken commands over there, so this module
-opens it **read-only**, copies what AvailabilityIQ needs, and is never run again
-(decisions.md D-004).
-
-Raw-first: tables are written verbatim. Nothing is renamed, filtered or cleaned here.
-The point of L0 is that it can be checked against the source.
+Opened read-only, since the database belongs to another project of mine. Run
+once; everything downstream works off the parquet files.
 """
 
 import sqlite3
@@ -20,8 +14,8 @@ CORPUS = Path(
 )
 RAW = Path("data/raw")
 
-#: Tables copied verbatim. `lineups` and `player_match_stats` are deliberately
-#: excluded: `player_match` already carries minutes, and they are 11.6M rows.
+# Tables copied verbatim. lineups and player_match_stats are deliberately
+# excluded: player_match already carries minutes, and they are 11.6M rows.
 TABLES = ("player_match", "fixtures", "sidelined", "leagues", "seasons", "types", "teams")
 
 
@@ -35,13 +29,13 @@ def connect_readonly(path: Path = CORPUS) -> sqlite3.Connection:
         raise CorpusMissingError(
             f"corpus not found at {path}\n"
             "AvailabilityIQ reads it once, read-only, to build data/raw/. "
-            "See docs/memory.md for the expected location."
+            "Check the CORPUS path at the top of this file."
         )
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
 
 
 def export_all(dest: Path = RAW) -> dict[str, int]:
-    """Copy every table in ``TABLES`` to Parquet. Returns rows written per table."""
+    """Copy every table in TABLES to Parquet. Returns rows written per table."""
     dest.mkdir(parents=True, exist_ok=True)
     written: dict[str, int] = {}
     with connect_readonly() as conn:

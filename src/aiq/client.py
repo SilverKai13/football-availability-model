@@ -1,16 +1,10 @@
-"""The one Sportmonks client. All HTTP for this project goes through here.
+"""Sportmonks API client.
 
-Deliberately thin. AvailabilityIQ needs exactly one thing from the API — dates of
-birth, because the corpus ``players`` table is empty and DOB is what turns a fuzzy
-name match into a reliable one. Everything else comes from the exported corpus, so
-this module exists for a single Phase 0 errand and is never on the modelling path.
+Only used once, to fetch dates of birth. The players table in the database I
+exported is empty, and DOB is what makes the Transfermarkt match work.
+Everything else comes out of the export.
 
-Conventions inherited from the sibling project's client, which was hardened against
-this API over several months (see ``ppa-data-engine/src/ppa/client/sportmonks.py``):
-
-- the key travels in the ``Authorization`` header, never in a URL or a log line;
-- rate limits are read from the response **root**, per entity bucket, never counted;
-- raw-first — responses are written verbatim before anything parses them.
+The key goes in the Authorization header and is never logged.
 """
 
 import json
@@ -29,13 +23,13 @@ Json = dict[str, Any]
 
 
 class ApiKeyMissingError(RuntimeError):
-    """No API key configured — set SPORTMONKS_API_KEY in .env."""
+    """No API key configured, set SPORTMONKS_API_KEY in .env."""
 
 
 def load_api_key() -> str:
-    """Read the key from the environment, falling back to a ``.env`` file.
+    """Read the key from the environment, falling back to a .env file.
 
-    The value is never printed, logged, or written to ``data/raw/``.
+    The value is never printed, logged, or written to data/raw/.
     """
     key = os.environ.get("SPORTMONKS_API_KEY")
     if not key and ENV_FILE.exists():
@@ -60,7 +54,7 @@ class SportmonksClient:
             headers={"Authorization": api_key or load_api_key(), "Accept": "application/json"},
             timeout=timeout,
         )
-        #: Latest rate_limit object seen, per entity bucket.
+        # Latest rate_limit object seen, per entity bucket.
         self.rate_limits: dict[str, Json] = {}
 
     def get(self, endpoint: str, **params: str | int) -> Json:
@@ -88,7 +82,7 @@ class SportmonksClient:
 
 
 def write_raw(name: str, payload: object) -> Path:
-    """Persist a raw payload under ``data/raw/``. Never contains the API key."""
+    """Persist a raw payload under data/raw/. Never contains the API key."""
     RAW.mkdir(parents=True, exist_ok=True)
     path = RAW / name
     path.write_text(json.dumps(payload, indent=1), encoding="utf-8")
@@ -96,16 +90,16 @@ def write_raw(name: str, payload: object) -> Path:
 
 
 def fetch_squad_players(pairs: list[tuple[int, int]], *, verbose: bool = True) -> list[Json]:
-    """Fetch squads for ``(season_id, team_id)`` pairs, returning raw squad rows.
+    """Fetch squads for (season_id, team_id) pairs, returning raw squad rows.
 
     The squads route is the cheap way to reach dates of birth. Fetching players by id
-    would be one call each — 11,175 calls against a 2,000/hour bucket, so nearly six
+    would be one call each, 11,175 calls against a 2,000/hour bucket, so nearly six
     hours. Squads cover the same players at one call per team-season: 378 calls for the
     2022+ window, inside a single hour's budget.
 
-    Each row carries a ``player`` sub-object with ``firstname``, ``lastname`` and
-    ``date_of_birth``. Those name parts are materially cleaner than the corpus's
-    ``player_name``, which is mangled on 0.78% of rows (D-012).
+    Each row carries a player sub-object with firstname, lastname and
+    date_of_birth. Those name parts are materially cleaner than the corpus's
+    player_name, which is mangled on 0.78% of rows.
     """
     client = SportmonksClient()
     rows: list[Json] = []

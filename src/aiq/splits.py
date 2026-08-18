@@ -1,15 +1,12 @@
-"""The three splitters. The gap between them is the headline result (D-005).
+"""The three train/test splitters.
 
-Two are honest and one is deliberately not. The dishonest one exists to be reported:
-a random split over player-weeks puts week *t* in train and week *t+1* in test, where
-the features are nearly identical and the labels correlated, so the model is not
-predicting anything — it is recognising rows it has already seen. Quantifying that gap
-is the point of the project, and it does not depend on the model being good.
+Two honest ones and a deliberately bad one. The random split is there to be
+reported, not believed: consecutive weeks for the same player look almost
+identical, so shuffling them lets the model recognise rows instead of predicting
+them.
 
-**Only two honest folds are available.** The panel holds three full seasons plus a
-4,141-week sliver of 2025/26. Forward chaining over three seasons gives two folds, and
-the sliver carries 43 events — far too few for a stable PR-AUC, so it is skipped rather
-than reported as a third fold. Stating that is better than manufacturing folds.
+Only two honest folds are possible. There are three full seasons plus a short
+stub of 2025/26 carrying 43 events, which is too few to test on.
 """
 
 from typing import NamedTuple
@@ -19,13 +16,13 @@ import pandas as pd
 from numpy.typing import NDArray
 from sklearn.model_selection import KFold
 
-#: Fold indices are positional into the panel.
+# Fold indices are positional into the panel.
 Ints = NDArray[np.int64]
 
-#: European seasons start in July.
+# European seasons start in July.
 SEASON_START_MONTH = 7
 
-#: A test fold below this many positives gives a PR-AUC too unstable to report.
+# A test fold below this many positives gives a PR-AUC too unstable to report.
 MIN_TEST_EVENTS = 200
 
 
@@ -38,14 +35,14 @@ class Fold(NamedTuple):
 
 
 def season_of(mondays: pd.Series) -> pd.Series:
-    """Label each Monday with its European season, e.g. ``2023/24``."""
+    """Label each Monday with its European season, e.g. 2023/24."""
     stamps = pd.to_datetime(mondays)
     start_year = stamps.dt.year.where(stamps.dt.month >= SEASON_START_MONTH, stamps.dt.year - 1)
     return start_year.astype(str) + "/" + (start_year + 1).astype(str).str[-2:]
 
 
 def naive_random_folds(panel: pd.DataFrame, *, n_splits: int = 5, seed: int = 0) -> list[Fold]:
-    """Random K-fold over player-weeks. **Dishonest by construction.**
+    """Random K-fold over player-weeks. Dishonest by construction.
 
     Built to be reported, not to be believed. Adjacent weeks of the same player share
     almost all their features and correlated labels, so random assignment leaks the
@@ -74,7 +71,7 @@ def _chain(panel: pd.DataFrame, *, group_players: bool, min_test_events: int) ->
             continue
 
         if group_players:
-            # Generalisation to a player never seen in training — a new signing.
+            # Generalisation to a player never seen in training, a new signing.
             test_players = set(panel.player_id.to_numpy()[is_test])
             is_train = is_train & ~panel.player_id.isin(test_players).to_numpy()
 

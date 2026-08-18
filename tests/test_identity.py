@@ -1,7 +1,4 @@
-"""Tests for name normalisation, canonicalisation and the alias table.
-
-No test reaches the network or opens the corpus.
-"""
+"""Tests for name cleaning and the crosswalk."""
 
 import numpy as np
 import pandas as pd
@@ -57,7 +54,7 @@ def test_normalise_name_folds_accents_and_punctuation(raw: str, expected: str) -
 
 @pytest.mark.parametrize("empty", [None, np.nan, float("nan")])
 def test_null_names_never_become_the_string_nan(empty: object) -> None:
-    """Regression: str(NaN) normalised to "nan", collapsing 5,863 players into one block."""
+    """str(NaN) would give "nan", which puts every unnamed player in one bucket."""
     assert normalise_name(empty) == ""
     assert surname_of(empty) == ""
     assert first_initial_of(empty) == ""
@@ -70,7 +67,7 @@ def test_surname_and_initial_handle_the_abbreviated_format() -> None:
 
 
 def test_modal_name_wins_over_misnamed_rows(player_match: pd.DataFrame) -> None:
-    """D-012. The mode is what makes canonicalisation safe."""
+    """. The mode is what makes canonicalisation safe."""
     dim = build_players_dim(player_match)
     assert len(dim) == 1
     assert dim.name_raw.iloc[0] == "Luke Steele"
@@ -78,7 +75,7 @@ def test_modal_name_wins_over_misnamed_rows(player_match: pd.DataFrame) -> None:
 
 
 def test_misnamed_rows_are_dropped_from_the_spine(player_match: pd.DataFrame) -> None:
-    """D-012. Rows disagreeing with the canonical surname leave the exposure spine."""
+    """. Rows disagreeing with the canonical surname leave the exposure spine."""
     dim = build_players_dim(player_match)
     appearances = build_appearances(player_match, dim)
     assert len(appearances) == 8, "the two misnamed rows should be gone"

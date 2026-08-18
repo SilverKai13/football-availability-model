@@ -1,19 +1,11 @@
-"""Metrics chosen for a 2% base rate, plus the one a physio actually acts on.
+"""Metrics that survive a 2% base rate.
 
-**Why not ROC-AUC.** At a 1.9% base rate it is flattered by the majority class: a model
-can look strong while being useless at the top of the ranking, which is the only part
-anyone uses. It may appear in the report only directly beside the base rate that
-flatters it (locked decision 6).
+ROC-AUC is not reported on its own, at this base rate it is flattered by the
+majority class. PR-AUC and Brier instead, plus calibration error, because a
+probability you can trust is more use here than a slightly better ranking.
 
-**Why calibration gets equal billing.** Discrimination tells you the ranking is right;
-calibration tells you the number means something. A physio told "7%" needs that to
-happen about seven times in a hundred. An over-confident 40% is worse than no model,
-because it spends trust that cannot be got back.
-
-**precision@5 is the operational metric.** Nobody rests a squad by probability
-threshold. They look at the few names at the top of Monday's list, so the honest
-question is: of the five players this model flagged highest for a squad this week, how
-many actually became unavailable?
+precision@5 is the practical one: of the 5 players flagged highest for a squad
+in a given week, how many actually became unavailable.
 """
 
 import numpy as np
@@ -21,10 +13,10 @@ import pandas as pd
 from numpy.typing import NDArray
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-#: Metric inputs are plain float arrays; the alias keeps signatures readable.
+# Metric inputs are plain float arrays; the alias keeps signatures readable.
 Floats = NDArray[np.float64] | NDArray[np.int64]
 
-#: Shortlist length for precision@k. A physio scans a handful of names, not a threshold.
+# Shortlist length for precision@k. A physio scans a handful of names, not a threshold.
 DEFAULT_K = 5
 
 
@@ -93,15 +85,15 @@ def reliability_table(y_true: Floats, y_prob: Floats, *, bins: int = 10) -> pd.D
 def precision_at_k(
     keys: pd.DataFrame, y_true: Floats, y_prob: Floats, *, k: int = DEFAULT_K
 ) -> float:
-    """Mean precision in the top ``k`` of each squad-week.
+    """Mean precision in the top k of each squad-week.
 
     Args:
-        keys: Must carry ``team_id`` and ``monday`` — the squad-week grouping.
+        keys: Must carry team_id and monday, the squad-week grouping.
         y_true: Realised labels.
         y_prob: Predicted probabilities.
         k: Shortlist length.
 
-    Squad-weeks with fewer than ``k`` players in the risk set are skipped: a top-5 out
+    Squad-weeks with fewer than k players in the risk set are skipped: a top-5 out
     of three is not a top-5, and including them inflates the score.
     """
     frame = keys[["team_id", "monday"]].copy()

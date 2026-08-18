@@ -1,24 +1,17 @@
-"""Sensitivity analyses for the two assumptions most likely to be wrong.
+"""Two sensitivity checks.
 
-**1. ``unknown injury``.** 18.9% of spells carry no diagnosis at all. They are mapped to
-``injury`` because the string says so and because Transfermarkt uses it when a club did
-not disclose (D-011). If the headline result depends on that call, the call needs
-defending; if it does not, the result is sturdier than it looked.
+First, whether the result depends on treating "unknown injury" as an injury.
 
-**2. Invisible European exposure.** The corpus holds five domestic leagues, so Champions
-League and Europa League minutes do not exist in it (risks.md #3). Rather than only
-excluding those clubs and re-checking, this module runs the sharper test: if the bias
-is real, European clubs should show a **higher injury rate at the same observed
-minutes**, because their true load is higher than anything we can see.
-
-European participation is proxied by a **top-six domestic finish in the previous
-season**, computed from stored fixture results. It is a proxy: the exact qualification
-rules vary by league and season, and cup routes are invisible here.
+Second, how much the missing European fixtures matter. Rather than just dropping
+those clubs, the check is whether they get injured more often at the same
+observed minutes, which is what you would expect if they carry load we cannot
+see. European participation is approximated by a top six finish the season
+before, which is rough. Cup routes are invisible here.
 """
 
 import pandas as pd
 
-#: Domestic finishing position taken as a proxy for European participation next season.
+# Domestic finishing position taken as a proxy for European participation next season.
 EUROPEAN_POSITIONS = 6
 
 
@@ -48,7 +41,7 @@ def league_tables(fixtures: pd.DataFrame) -> pd.DataFrame:
 
 
 def european_team_seasons(fixtures: pd.DataFrame) -> set[tuple[int, int]]:
-    """``(team_id, season_id)`` pairs likely playing in Europe *that* season.
+    """(team_id, season_id) pairs likely playing in Europe *that* season.
 
     A club plays in Europe in the season *after* the one it qualified in, so the flag
     is carried forward one season rather than applied to the finishing season itself.
@@ -77,9 +70,9 @@ def rate_by_minutes_band(
 ) -> pd.DataFrame:
     """Injury rate by observed-minutes band, split by European participation.
 
-    **The test for invisible exposure.** Domestic minutes are the only load either
+    The test for invisible exposure. Domestic minutes are the only load either
     group is measured on. If European clubs carry extra unseen minutes, their injury
-    rate should sit above the domestic-only clubs *within the same observed band* —
+    rate should sit above the domestic-only clubs *within the same observed band* -
     same measured load, more real load, more injuries.
     """
     frame = pd.DataFrame(

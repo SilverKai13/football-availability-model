@@ -1,8 +1,6 @@
-"""Tests for baselines, models and calibration.
+"""Tests for the baselines, models and calibration.
 
-The one that matters most is the calibration-leak test: isotonic must never see a row
-from the test season. That is the subtlest leak available in this project (invariant 5).
-No test reaches the network or opens the corpus.
+The important one is that the calibrator never sees the rows it scores.
 """
 
 import numpy as np
@@ -21,7 +19,7 @@ from aiq.models import (
 
 @pytest.fixture
 def dataset() -> tuple[pd.DataFrame, NDArray[np.float64], pd.Series]:
-    """Two seasons of weeks with a genuine signal in ``injury_absences_365d``."""
+    """Two seasons of weeks with a genuine signal in injury_absences_365d."""
     rng = np.random.default_rng(0)
     weeks = pd.date_range("2023-08-07", periods=80, freq="7D")
     rows = [{"monday": week, "player": pid} for week in weeks for pid in range(30)]
@@ -156,16 +154,16 @@ def test_feature_columns_exclude_keys_and_labels() -> None:
     """The feature list is explicit, so a key can never drift into the model."""
     forbidden = {"player_id", "monday", "team_id", "label_injury", "label_any", "in_risk_set"}
     assert not (set(FEATURE_COLUMNS) & forbidden)
-    assert "suspensions_365d" not in FEATURE_COLUMNS, "constant-zero column (D-016)"
+    assert "suspensions_365d" not in FEATURE_COLUMNS, (
+        "always zero, there are no suspensions in the feed"
+    )
 
 
 def test_unsupported_isotonic_steps_are_capped() -> None:
-    """Regression: isotonic's top step predicted 1.000 for 28 real rows.
+    """Isotonic's top step can sit on two points and still say 1.0.
 
-    A step backed by a couple of calibration points is not evidence of certainty, and
-    `out_of_bounds="clip"` hands its value to everything above it. The metrics hardly
-    noticed; a squad page showing "100% risk" would not have survived contact with a
-    physio.
+    With out_of_bounds="clip" everything above the calibration range inherits it,
+    which is how you end up showing a player a 100% risk.
     """
     rng = np.random.default_rng(3)
     weeks = pd.date_range("2023-08-07", periods=60, freq="7D")
@@ -174,7 +172,7 @@ def test_unsupported_isotonic_steps_are_capped() -> None:
     n = len(frame)
     for column in FEATURE_COLUMNS:
         frame[column] = rng.normal(size=n)
-    # A handful of extreme rows, all positive — exactly what creates a lone top step.
+    # A handful of extreme rows, all positive, exactly what creates a lone top step.
     frame["injury_absences_365d"] = rng.poisson(0.5, n).astype(float)
     labels = rng.binomial(1, 0.02, n).astype(float)
     extreme = frame.index[:6]

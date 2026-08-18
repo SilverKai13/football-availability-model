@@ -1,8 +1,4 @@
-"""Tests for the three splitters and the metric suite.
-
-The splitter tests are leakage tests: an honest fold must never train on a row dated
-at or after its test season. No test reaches the network or opens the corpus.
-"""
+"""Tests for the splitters and the metrics."""
 
 import numpy as np
 import pandas as pd
@@ -68,7 +64,7 @@ def test_grouped_split_shares_no_players(panel: pd.DataFrame) -> None:
 
 
 def test_ungrouped_split_does_share_players(panel: pd.DataFrame) -> None:
-    """Deliberately so — a club predicts for players it has history on."""
+    """Deliberately so, a club predicts for players it has history on."""
     folds = forward_chain_folds(panel, min_test_events=1)
     overlaps = [
         set(panel.player_id.iloc[f.train]) & set(panel.player_id.iloc[f.test]) for f in folds

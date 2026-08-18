@@ -1,8 +1,4 @@
-"""Leakage and construction tests for the player-week panel.
-
-These are the tests that matter. If time runs short, keep these and drop others
-(CLAUDE.md §Quality gate). No test here reaches the network or opens the corpus.
-"""
+"""Tests for the player-week panel, mostly around leakage."""
 
 from datetime import date
 
@@ -62,7 +58,7 @@ def test_onset_inside_horizon_is_labelled(appearances: pd.DataFrame) -> None:
 
 
 def test_onset_outside_horizon_is_not_labelled(appearances: pd.DataFrame) -> None:
-    """A spell starting 8 days out must not label the Monday — the horizon is 7."""
+    """A spell starting 8 days out must not label the Monday, the horizon is 7."""
     spells = _spells(
         [
             {
@@ -100,11 +96,10 @@ def test_already_absent_weeks_are_excluded_not_zero_labelled(
 def test_non_injury_absence_removes_the_week_but_never_labels_injury(
     appearances: pd.DataFrame,
 ) -> None:
-    """D-010: injuries-only headline, but the risk set still excludes any absence.
+    """.
 
-    Uses ``illness`` — 10.5% of real spells. This test originally used ``suspension``,
-    which turned out not to exist in the Transfermarkt injuries feed at all; that
-    vocabulary was guessed before the data arrived.
+    Uses illness, which is about 10.5% of spells. There are no suspensions in this
+    feed at all.
     """
     spells = _spells(
         [
@@ -124,7 +119,7 @@ def test_non_injury_absence_removes_the_week_but_never_labels_injury(
 
 
 def test_label_any_dominates_label_injury(appearances: pd.DataFrame) -> None:
-    """R2.8. label_any >= label_injury on every row, by construction."""
+    """label_any >= label_injury on every row, by construction."""
     spells = _spells(
         [
             {
@@ -148,7 +143,7 @@ def test_label_any_dominates_label_injury(appearances: pd.DataFrame) -> None:
 def test_unknown_category_removes_week_but_labels_neither(
     appearances: pd.DataFrame,
 ) -> None:
-    """D-011. An uncategorised absence is not evidence that no injury occurred."""
+    """. An uncategorised absence is not evidence that no injury occurred."""
     spells = _spells(
         [
             {

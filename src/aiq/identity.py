@@ -1,20 +1,10 @@
-"""Player identity: name normalisation, canonicalisation, and the crosswalk.
+"""Player name cleaning and the Transfermarkt crosswalk.
 
-Two jobs, in order.
-
-**Canonicalisation.** ``player_match.player_name`` is not reliable per row. About
-0.78% of rows carry the name of a *different player from the same team in the same
-era* — a lineup misalignment inherited from the sibling project's transform. Roughly
-a fifth of those rows are wholly misaligned (they also carry the other player's
-position), so ~0.17% of the exposure spine is attributed to the wrong player. See
-docs/risks.md #9 and decisions.md D-012.
-
-The fix is to canonicalise each ``player_id`` to its modal name and drop rows that
-disagree. The mode is safe: it is never below 50% of a player's rows and is 96.8% at
-the median.
-
-**Crosswalk.** Transfermarkt player -> Sportmonks ``player_id``. Names alone are not
-enough, which is why date of birth is fetched separately.
+Two jobs. First, player_name in the match data is wrong on about 0.78% of rows
+(it shows a teammate's name), so each player_id gets pinned to its most common
+name and the rows that disagree get dropped. Second, match Transfermarkt player
+IDs onto Sportmonks ones. Names alone are not enough, so date of birth does the
+heavy lifting.
 """
 
 import re
@@ -22,19 +12,17 @@ import unicodedata
 
 import pandas as pd
 
-#: Sportmonks position ids, confirmed against `types.developer_name` (docs/memory.md).
+# Sportmonks position ids, confirmed against types.developer_name.
 POSITIONS = {24: "GK", 25: "DEF", 26: "MID", 27: "ATT"}
 
 
 def normalise_name(raw: object) -> str:
-    """Strip accents, punctuation and case: ``"John O'Shea"`` -> ``"john oshea"``.
+    """Strip accents, punctuation and case: "John O'Shea" -> "john oshea".
 
-    Nulls return ``""``, not ``"nan"``. Without this guard ``str(NaN)`` normalises to
-    the literal word "nan" and every player missing a name collapses into one blocking
-    bucket — 5,863 of them, on the first real run.
+    Nulls come back as "" rather than "nan", otherwise every player without a name
+    lands in the same blocking bucket.
 
-    NFKD also folds the non-breaking space the API appends to some display names
-    (``"Koke\\xa0"``), which is why no separate whitespace fix is needed.
+    NFKD also deals with the non-breaking space the API puts on some display names.
     """
     if raw is None or (isinstance(raw, float) and pd.isna(raw)):
         return ""
@@ -44,22 +32,22 @@ def normalise_name(raw: object) -> str:
 
 
 def surname_of(raw: object) -> str:
-    """Last token of the normalised name — the crosswalk's blocking key."""
+    """Last token of the normalised name, the crosswalk's blocking key."""
     tokens = normalise_name(raw).split()
     return tokens[-1] if tokens else ""
 
 
 def first_initial_of(raw: object) -> str:
-    """First letter of the given name, which is all ``"L. Cattermole"`` gives us."""
+    """First letter of the given name, which is all "L. Cattermole" gives us."""
     tokens = normalise_name(raw).split()
     return tokens[0][0] if len(tokens) > 1 and tokens[0] else ""
 
 
 def build_players_dim(player_match: pd.DataFrame) -> pd.DataFrame:
-    """One row per ``player_id``, carrying its modal name and position.
+    """One row per player_id, carrying its modal name and position.
 
     Date of birth is joined in separately; it is not in the corpus, whose
-    ``players`` table is empty.
+    players table is empty.
     """
     counts = player_match.groupby(["player_id", "player_name"]).size().rename("n").reset_index()
     modal = counts.sort_values("n", ascending=False).drop_duplicates("player_id")
@@ -85,16 +73,16 @@ def attach_dob(players_dim: pd.DataFrame, dob: pd.DataFrame) -> pd.DataFrame:
 
     Three names per player, none of which is reliably the right one to match on:
 
-    - ``display_name`` — the API's common name. Matches the corpus name 79.7% of the
+    - display_name, the API's common name. Matches the corpus name 79.7% of the
       time, and most of the misses are a trailing non-breaking space.
-    - the legal name from ``firstname``/``lastname`` — matches only 51%. Transfermarkt
+    - the legal name from firstname/lastname, matches only 51%. Transfermarkt
       generally lists common names, so preferring this would *hurt* the join:
-      ``Koke`` becomes ``Jorge Resurrección Merodio``.
-    - ``name_raw`` — the corpus modal name, mangled on 0.78% of rows (D-012) and
-      abbreviated for 12.7% of players (``L. Cattermole``).
+      Koke becomes Jorge Resurrección Merodio.
+    - name_raw, the corpus modal name, mangled on 0.78% of rows and
+      abbreviated for 12.7% of players (L. Cattermole).
 
     So none is promoted to "the" name. All three are kept and
-    :func:`build_aliases` fans them out for matching.
+    build_aliases fans them out for matching.
     """
     return players_dim.merge(
         dob[["player_id", "firstname", "lastname", "display_name", "date_of_birth"]],
@@ -108,7 +96,7 @@ def build_aliases(players_dim: pd.DataFrame) -> pd.DataFrame:
 
     Identity resolution against a source that may use any of a player's names is a
     many-to-one problem, so the crosswalk matches against every variant rather than
-    betting on one. ``surname`` and ``first_initial`` ride along as blocking keys.
+    betting on one. surname and first_initial ride along as blocking keys.
     """
     legal = (players_dim.firstname.fillna("") + " " + players_dim.lastname.fillna("")).str.strip()
     sources = {
@@ -134,12 +122,12 @@ def build_aliases(players_dim: pd.DataFrame) -> pd.DataFrame:
     return aliases.drop_duplicates(subset=["player_id", "alias"]).reset_index(drop=True)
 
 
-#: Transfermarkt profile names carry their own id: ``"Silvio Adzic (1)"``.
+# Transfermarkt profile names carry their own id: "Silvio Adzic (1)".
 _TM_ID_SUFFIX = re.compile(r"\s*\(\d+\)\s*$")
 
 
 def clean_tm_name(raw: object) -> str:
-    """Strip the trailing ``(id)`` Transfermarkt appends to profile names."""
+    """Strip the trailing (id) Transfermarkt appends to profile names."""
     if raw is None or (isinstance(raw, float) and pd.isna(raw)):
         return ""
     return _TM_ID_SUFFIX.sub("", str(raw)).strip()
@@ -148,14 +136,14 @@ def clean_tm_name(raw: object) -> str:
 def build_crosswalk(
     aliases: pd.DataFrame, players_dim: pd.DataFrame, profiles: pd.DataFrame
 ) -> pd.DataFrame:
-    """Map Transfermarkt ``player_id`` to Sportmonks ``player_id``.
+    """Map Transfermarkt player_id to Sportmonks player_id.
 
     Date of birth carries the join; names only narrow the candidates. On the Sportmonks
-    side ``(surname, DOB)`` is ambiguous for 0.17% of pairs, so a DOB agreement plus a
+    side (surname, DOB) is ambiguous for 0.17% of pairs, so a DOB agreement plus a
     surname agreement is very close to an identifier.
 
     Two passes, most specific first. A Transfermarkt player is matched once and never
-    revisited, so ``full_name_dob`` wins over ``surname_dob`` where both fire.
+    revisited, so full_name_dob wins over surname_dob where both fire.
 
     Returns one row per matched pair with the method that matched it, so the audit can
     report match quality by method rather than as a single undifferentiated rate.
@@ -199,8 +187,8 @@ def build_appearances(player_match: pd.DataFrame, players_dim: pd.DataFrame) -> 
 
     A row whose surname disagrees with the player's canonical surname is dropped
     rather than trusted. That costs ~0.78% of rows and removes every row we can
-    show to be corrupt (D-012). ``minutes`` keeps its nulls — a null minute is
-    unknown, not unplayed (D-007).
+    show to be corrupt. minutes keeps its nulls, a null minute is
+    unknown, not unplayed.
     """
     canon = players_dim[["player_id", "surname_norm"]]
     frame = player_match.merge(canon, on="player_id", how="left")

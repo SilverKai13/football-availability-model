@@ -1,8 +1,7 @@
-"""Leakage tests for the as-of feature builder.
+"""Tests for the feature builder.
 
-The two that matter most, per CLAUDE.md: shifting ``as_of`` forward one week changes
-every rolling feature, and no feature reads a row dated after the cutoff. Everything
-else here supports those. No test reaches the network or opens the corpus.
+The two that matter: moving the as-of date forward changes every rolling
+feature, and removing data from after the cutoff changes nothing.
 """
 
 import numpy as np
@@ -127,7 +126,7 @@ def test_rolling_window_excludes_the_current_week(appearances: pd.DataFrame) -> 
 def test_shifting_as_of_forward_changes_every_rolling_feature(
     appearances: pd.DataFrame,
 ) -> None:
-    """CLAUDE.md's headline leakage test.
+    """The main leakage test.
 
     Asserted as "no rolling feature is constant across as_of" rather than "every
     feature differs at one chosen pair". A feature that ignored the cutoff would be
@@ -156,7 +155,7 @@ def test_first_week_has_no_history(appearances: pd.DataFrame) -> None:
 
 
 def test_join_keys_are_never_shifted(appearances: pd.DataFrame) -> None:
-    """Regression: an endswith("d") filter once matched player_id and shifted it."""
+    """player_id must not get shifted along with the rolling columns."""
     rolled = rolling_exposure(weekly_exposure(appearances))
     assert rolled.player_id.notna().all(), "player_id was shifted along with the windows"
     assert (rolled.player_id == 1).all()
@@ -201,7 +200,7 @@ def test_scheduled_next_week_is_allowed_but_trailing_is_shifted(
 
 
 def test_blank_team_week_is_zero_not_skipped(fixtures: pd.DataFrame) -> None:
-    """Regression: a groupby drops empty weeks, so a trailing count reached over them."""
+    """groupby drops empty weeks, so they have to be filled back in first."""
     sparse = fixtures[fixtures.starting_at != pd.Timestamp("2024-02-07")]
     congestion = congestion_features(sparse)
     row = congestion[

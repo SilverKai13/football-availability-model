@@ -1,20 +1,13 @@
-"""The player-week panel: risk set, labels, censoring.
+"""Builds the player-week panel: who is at risk each Monday, and what happened.
 
-The unit of analysis is one (player, Monday) pair **that is in the risk set**. Weeks
-where the player was already absent do not appear as rows at all — a player who is
-out cannot become out, and labelling those weeks zero would flood the panel with
-guaranteed negatives (architecture.md §5, invariant 3).
+One row per player per Monday. Players already unavailable on that Monday are
+left out rather than labelled zero, because they cannot become unavailable if
+they already are.
 
-Two labels ride on the same rows (D-010): ``label_injury`` is the headline,
-``label_any`` is reported beside it. The risk set is identical for both, and excludes
-weeks covered by an absence of **any** category — a suspended player is not available
-for selection, so they cannot become unavailable.
-
-**The trap this module exists to avoid.** It is tempting to decide "this player is
-still absent" by looking at when they next played. That reads the future, and it makes
-the training risk set something you could not compute on a Monday morning in
-production. Membership here uses trailing information plus an assumed duration for
-spells with no recorded end (invariant 4).
+One thing to be careful about: do not decide whether someone is still absent by
+looking at when they next played. That reads the future, and you could not do it
+on a Monday morning in real life. Spells with no end date get an assumed
+duration instead.
 """
 
 from datetime import date, timedelta
@@ -23,30 +16,24 @@ import pandas as pd
 
 from aiq import absences
 
-#: Horizon. Locked at seven days (CLAUDE.md locked decision 8).
+# Horizon. Locked at seven days.
 HORIZON_DAYS = 7
 
-#: A player is "in contention for selection" if they appeared within this window.
-#: Trailing-only, so it is computable on the Monday.
+# A player is "in contention for selection" if they appeared within this window.
+# Trailing-only, so it is computable on the Monday.
 CONTENTION_WINDOW_DAYS = 56
 
-#: Categories that count toward ``label_injury``.
+# Categories that count toward label_injury.
 INJURY_CATEGORIES = frozenset({"injury"})
 
-#: Categories that count toward ``label_any``. Taken from :mod:`aiq.absences` so the
-#: vocabulary has exactly one definition. An earlier hand-written copy here was
-#: guessed before the real data arrived — it listed ``suspension`` and
-#: ``international``, which this source does not contain, and omitted ``illness`` and
-#: ``fatigue``, which are 11.5% of spells. ``label_any`` came out at 1.44% against a
-#: ``label_injury`` of 1.42%, which is what gave it away.
-#:
-#: ``unknown`` is in neither list: an absence we could not categorise is not evidence
-#: that no injury occurred (D-011).
+# Categories counting toward label_any. Imported from absences so the vocabulary
+# is only defined in one place. unknown is in neither list, an absence we could
+# not categorise is not evidence that nothing happened.
 LABELLED_CATEGORIES = frozenset(absences.LABELLED)
 
 
 def mondays_between(start: date, end: date) -> list[date]:
-    """Every Monday in ``[start, end]``, inclusive."""
+    """Every Monday in [start, end], inclusive."""
     first = start + timedelta(days=(7 - start.weekday()) % 7)
     out: list[date] = []
     cursor = first
@@ -72,7 +59,7 @@ def median_durations(absences: pd.DataFrame) -> dict[str, float]:
 
 
 def with_assumed_end(absences: pd.DataFrame, medians: dict[str, float]) -> pd.DataFrame:
-    """Add ``assumed_end``: the real end date, or an imputed one where it is missing."""
+    """Add assumed_end: the real end date, or an imputed one where it is missing."""
     frame = absences.copy()
     fallback = float(pd.Series(list(medians.values())).median()) if medians else 30.0
     imputed_days = frame.category.map(medians).fillna(fallback)
@@ -92,21 +79,21 @@ def build_panel(
     """Build the player-week panel.
 
     Args:
-        appearances: L1 exposure spine — ``player_id``, ``match_date``, ``team_id``,
-            ``league_id``, ``season_id``.
-        absences: L1 spells — ``player_id``, ``start_date``, ``category``, and
-            ``assumed_end`` (add it with :func:`with_assumed_end` first).
+        appearances: L1 exposure spine, player_id, match_date, team_id,
+            league_id, season_id.
+        absences: L1 spells, player_id, start_date, category, and
+            assumed_end (add it with with_assumed_end first).
         horizon_days: Label window length. Locked at 7.
         contention_days: Trailing appearance window defining selection contention.
-        label_end: Last date the label source can be trusted to cover. **Pass this
-            whenever the absence feed ends before the exposure data does.** The
+        label_end: Last date the label source can be trusted to cover. Pass this
+            whenever the absence feed ends before the exposure data does. The
             Transfermarkt feed stops on 2025-12-22 while the corpus runs to
             2026-05-24; without this the last five months would silently become
             ~40,000 guaranteed negatives and quietly halve the base rate.
 
     Returns:
-        One row per in-risk-set (player, Monday), with ``label_injury`` and
-        ``label_any``. The final ``horizon_days`` of the observation window are
+        One row per in-risk-set (player, Monday), with label_injury and
+        label_any. The final horizon_days of the observation window are
         dropped as right-censored: their outcome is not observable.
     """
     app = appearances.copy()
@@ -141,7 +128,7 @@ def build_panel(
             .reset_index()
         )
 
-        # Already absent on the Monday -> excluded, not zero-labelled (invariant 3).
+        # Already absent on the Monday -> excluded, not zero-labelled.
         covering = spells[(spells.start_date <= stamp) & (spells.assumed_end >= stamp)]
         candidates = candidates[~candidates.player_id.isin(covering.player_id)]
         if candidates.empty:
