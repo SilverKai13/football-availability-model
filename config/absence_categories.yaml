@@ -1,0 +1,95 @@
+# Absence category mapping — the allowlist D-011 requires.
+#
+# The headline label depends entirely on this file (D-010), so it is explicit and
+# reviewed rather than a keyword heuristic. Unmapped strings land in `unknown`, are
+# enumerated by `aiq.absences.audit_categories`, and count toward NEITHER label — an
+# absence we cannot categorise is not evidence that no injury occurred.
+#
+# Rules are applied in the order below. `exact` wins over everything; then the pattern
+# groups in the order listed. Order matters: "Muscle fatigue" must reach `fatigue`
+# before the `muscle` keyword sends it to `injury`, and "Stomach flu" must reach
+# `illness` before "stomach" is read as an abdominal complaint.
+#
+# NOTE: Transfermarkt's injury table contains NO suspensions. `label_any` therefore
+# means "any recorded absence in this source", which is not the same as "unavailable
+# for any reason". Stated in the README rather than implied.
+
+order: [fatigue, rest, personal, illness, injury]
+
+# Exact matches, checked first. These are the strings where a keyword rule would
+# reach the wrong answer, or where the volume is large enough to deserve a decision.
+exact:
+  # 27,028 spells — 18.9% of everything, and the single most consequential call here.
+  # It self-describes as an injury; Transfermarkt uses it when the club did not
+  # disclose the nature. Excluding it would drop a fifth of the positive class for
+  # lack of a diagnosis we never needed. The audit reports its share separately so a
+  # sensitivity run can remove it.
+  unknown injury: injury
+  knock: injury
+  minor knock: injury
+  bruise: injury
+  strain: injury
+  sprain: injury
+  fracture: injury
+  surgery: injury
+  arthroscopy: injury
+  overstretching: injury
+  contortion: injury
+  cut: injury
+  open wound: injury
+  flesh wound: injury
+  laceration wound: injury
+  inflammation: injury
+  # Conditioning, not an injury event.
+  fitness: rest
+  rest: rest
+  # Non-football causes.
+  traffic accident: personal
+  toothache: personal
+  dental surgery: personal
+  depression: personal
+  # Isolation rather than illness itself, but functionally unavailable.
+  quarantine: illness
+
+patterns:
+  # Load-related complaints that are not injuries. Checked before `injury` because
+  # nearly all of them contain "muscle".
+  fatigue:
+    [fatigue, stiffness, sore muscles, contracture, tired]
+
+  rest:
+    [rest, fitness, lack of match practice]
+
+  personal:
+    [personal, private, family, funeral, birth of, adaptation, visa, doping,
+     toothache, dental, depression, mental, burnout, accident]
+
+  # Checked before `injury`: "Stomach flu" is illness, "Abdominal muscle strain" is not.
+  illness:
+    [ill, flu, cold, fever, virus, corona, covid, infection, tonsill, pneumonia,
+     bronchitis, angina, appendic, mononucle, poisoning, malaria, intestinal,
+     quarantine, cancer, kidney, heart, lung, pneumothorax, stomach problems,
+     stomach flu, gastro, sinus, asthma, allergy, anaemia, anemia, hepatitis,
+     glandular, tumour, tumor, thyroid,
+     # --- added after reviewing the unknown residual, 2026-08-18 ---
+     appendec, meningitis, chickenpox, tuberculosis, abscess, allergic,
+     skin disease, nerval, stroke, coma, cerebral, splenic, transplant,
+     varicose, vein occlusion, balance disorder, insect bite, mumps, measles]
+
+  # Everything musculoskeletal or traumatic.
+  injury:
+    [injur, muscle, hamstring, knee, ankle, ligament, tear, torn, strain, sprain,
+     fracture, broken, break, bruis, contusion, concussion, surgery, operation,
+     tendon, achilles, calf, thigh, groin, adductor, hip, back, shoulder, foot,
+     toe, finger, hand, wrist, arm, elbow, head, face, facial, nose, jaw, rib,
+     pelvi, pubic, meniscus, cartilage, disc, spine, vertebra, shin, tibia,
+     fibula, metatarsal, metacarpal, scaphoid, collarbone, kneecap, patell,
+     heel, neck, eye, cheekbone, skull, wound, cut, laceration, hernia,
+     lumbago, sciatica, nerve, bursitis, edema, oedema, cyst, inflammation,
+     irritation, problems, pain, damage, rupture, dislocation, whiplash,
+     stress reaction, hairline, crack, fissure, blockage, arch, capsul,
+     syndesmo, pubalgia, tendinopathy, plantar, dead leg, overstretching,
+     stretch, sore, blister, cramp,
+     # --- added after reviewing the unknown residual, 2026-08-18 ---
+     splinter, impingement, auditory, compartment, bone marrow, eardrum,
+     fraktur, combustion, corn, remove screws, screws/nails, swelling]

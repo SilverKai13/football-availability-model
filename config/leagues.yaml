@@ -1,0 +1,15 @@
+# League ids verified live against the Sportmonks entitled-leagues endpoint on
+# 2026-07-08 by the sibling project ppa-data-engine. Do not re-derive.
+leagues:
+  8:    {slug: premier-league, name: Premier League,      country: England}
+  9:    {slug: championship,   name: Championship,        country: England}
+  82:   {slug: bundesliga,     name: Bundesliga,          country: Germany}
+  564:  {slug: la-liga,        name: La Liga,             country: Spain}
+  1007: {slug: isl,            name: Indian Super League, country: India}
+
+# Leagues carried into modelling. Chosen on the Phase 0 evidence (docs/audit.md),
+# not in advance — D-017. Championship and ISL are excluded for reporting depth,
+# not for anything about the football: real injury incidence does not vary 35x
+# between the Bundesliga and the ISL, so their low rates measure Transfermarkt's
+# coverage rather than players' risk.
+modelled: [8, 82, 564]
