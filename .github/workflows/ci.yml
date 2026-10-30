@@ -248,8 +248,8 @@ jobs:
           done
           [ "$health" = "up" ]
           curl -s localhost:9090/api/v1/rules | python3 -c "import sys,json; g={x['name'] for x in json.load(sys.stdin)['data']['groups']}; print(sorted(g)); assert {'availabilityiq-api','availabilityiq-scoring'} <= g"
-          curl -s 'localhost:9090/api/v1/query?query=max(aiq_predictions_rows)' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(r); assert r and float(r[0]['value'][1]) == 216"
-          curl -s 'localhost:9090/api/v1/query?query=ALERTS{alertname="AiqPredictionsStale"}' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; assert not r, r; print('no stale alert, as expected')"
+          curl -sG localhost:9090/api/v1/query --data-urlencode 'query=max(aiq_predictions_rows)' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(r); assert r and float(r[0]['value'][1]) == 216"
+          curl -sG localhost:9090/api/v1/query --data-urlencode 'query=ALERTS{alertname="AiqPredictionsStale"}' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; assert not r, r; print('no stale alert, as expected')"
       - name: A second publish is picked up without a restart
         run: |
           kubectl -n aiq create job --from=cronjob/aiq-availabilityiq-scoring score-again
