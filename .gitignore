@@ -13,3 +13,13 @@ docs/
 CLAUDE.md
 README.md
 .claude/
+PODCAST_NOTES.md
+PODCAST_SCRIPT.md
+*.egg-info/
+
+# terraform working files; the lock file is committed on purpose
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
