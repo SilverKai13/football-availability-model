@@ -1,0 +1,285 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.13"
+  HELM_VERSION: v3.19.0
+  KUBECONFORM_VERSION: v0.8.0
+  PROMETHEUS_VERSION: 3.15.1
+  TERRAFORM_VERSION: 1.17.1
+  TFLINT_VERSION: v0.65.0
+  KPS_CHART_VERSION: 92.16.1
+  KIND_NODE_IMAGE: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+
+jobs:
+  checks:
+    name: lint, types, tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check src tests app
+      - run: ruff format --check src tests app
+      - run: mypy src tests
+      - run: pytest -q
+
+  chart:
+    name: helm chart, rules, dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Install kubeconform and promtool
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" | tar -xz -C /usr/local/bin kubeconform
+          curl -sSL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" | tar -xz
+          sudo mv "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool" /usr/local/bin/
+      - name: helm lint
+        run: |
+          helm lint deploy/chart/availabilityiq
+          helm lint deploy/chart/availabilityiq -f deploy/chart/availabilityiq/values-ci.yaml
+          helm lint deploy/chart/availabilityiq -f deploy/chart/availabilityiq/values-prod.example.yaml
+      - name: Rendered manifests validate against the Kubernetes and operator schemas
+        run: |
+          for values in values-ci.yaml values-prod.example.yaml; do
+            helm template aiq deploy/chart/availabilityiq -n aiq -f "deploy/chart/availabilityiq/$values" \
+              | kubeconform -strict -summary -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+      - name: Alert rules check and unit tests
+        working-directory: deploy/chart/availabilityiq/files
+        run: |
+          promtool check rules alerts.yaml
+          promtool test rules alerts_test.yaml
+      - name: Dashboard JSON parses and every panel has a query
+        run: |
+          python3 - <<'EOF'
+          import json
+          d = json.load(open("deploy/chart/availabilityiq/files/dashboard.json"))
+          assert d["panels"], "no panels"
+          for p in d["panels"]:
+              assert p.get("targets"), f"panel {p['title']} has no query"
+              assert all("expr" in t for t in p["targets"]), p["title"]
+          print(f"{len(d['panels'])} panels ok")
+          EOF
+
+  terraform:
+    name: terraform validate, tflint, config scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/terraform/aws
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+      - run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - run: tflint -f compact
+      - name: Misconfiguration scan over the Terraform and the chart (reported, not gating)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: deploy
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+          format: table
+
+  image:
+    name: container image
+    needs: [checks]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.name.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name
+        id: name
+        run: echo "image=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/football-availability-model" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ steps.name.outputs.image }}:ci
+          build-args: AIQ_VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: The image starts and answers /health with no data mounted
+        run: |
+          docker run -d --name api -p 8000:8000 "${{ steps.name.outputs.image }}:ci"
+          for i in $(seq 1 30); do curl -fsS localhost:8000/health && break; sleep 1; done
+          curl -fsS localhost:8000/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8000/ready)" = "503"
+          docker rm -f api
+      - name: Save for the cluster job
+        run: docker save "${{ steps.name.outputs.image }}:ci" -o /tmp/image.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image
+          path: /tmp/image.tar
+          retention-days: 1
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        if: github.event_name != 'pull_request'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.name.outputs.image }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ steps.meta.outputs.tags }}" | while read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "${{ steps.name.outputs.image }}:ci" "$tag"
+            docker push "$tag"
+          done
+
+  e2e:
+    name: deploy to a kind cluster and check it
+    needs: [image, chart]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: image
+          path: /tmp
+      - name: Create the cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: aiq
+          node_image: ${{ env.KIND_NODE_IMAGE }}
+      - name: Load the image
+        run: kind load image-archive /tmp/image.tar --name aiq
+      - name: Install Prometheus (operator, kube-state-metrics; no Grafana or Alertmanager)
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update
+          helm install kps prometheus-community/kube-prometheus-stack \
+            --version "${KPS_CHART_VERSION}" -n monitoring --create-namespace \
+            --set grafana.enabled=false --set alertmanager.enabled=false --set nodeExporter.enabled=false \
+            --set prometheus.prometheusSpec.scrapeInterval=5s --set prometheus.prometheusSpec.evaluationInterval=5s \
+            --set prometheus.prometheusSpec.resources.requests.memory=256Mi \
+            --wait --timeout 6m
+      - name: Install the chart
+        run: |
+          helm install aiq deploy/chart/availabilityiq -n aiq --create-namespace \
+            -f deploy/chart/availabilityiq/values-ci.yaml --wait=false
+          kubectl -n aiq get all
+      - name: Run the scoring job once and wait for it
+        run: |
+          kubectl -n aiq create job --from=cronjob/aiq-availabilityiq-scoring score-now
+          kubectl -n aiq wait --for=condition=complete job/score-now --timeout=300s
+          kubectl -n aiq logs job/score-now
+      - name: The API and the page become ready
+        run: |
+          kubectl -n aiq rollout status deploy/aiq-availabilityiq-api --timeout=180s
+          kubectl -n aiq rollout status deploy/aiq-availabilityiq-ui --timeout=300s
+      - name: helm test
+        run: helm test aiq -n aiq --logs --timeout 3m
+      - name: The API answers through the service
+        run: |
+          kubectl -n aiq port-forward svc/aiq-availabilityiq-api 8000:80 > /dev/null 2>&1 &
+          sleep 3
+          curl -fsS localhost:8000/ready | tee /tmp/ready.json
+          grep -q '"status": *"ready"' /tmp/ready.json
+          curl -fsS localhost:8000/v1/model | tee /tmp/model.json
+          grep -q '"rows": *216' /tmp/model.json
+          curl -fsS "localhost:8000/v1/squads/1000/risk?week=2025-08-11" | grep -q '"players"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' 'localhost:8000/v1/squads/1000/risk?week=2025-08-12')" = "422"
+          curl -fsS localhost:8000/metrics | grep -E '^aiq_predictions_rows 216'
+      - name: The page answers through its service
+        run: |
+          kubectl -n aiq port-forward svc/aiq-availabilityiq-ui 8501:80 > /dev/null 2>&1 &
+          sleep 3
+          curl -fsS localhost:8501/_stcore/health
+      - name: Prometheus scrapes the API and has the rules loaded
+        run: |
+          kubectl -n monitoring port-forward svc/kps-kube-prometheus-stack-prometheus 9090:9090 > /dev/null 2>&1 &
+          sleep 3
+          for i in $(seq 1 24); do
+            health=$(curl -s 'localhost:9090/api/v1/targets?state=active' | python3 -c "import sys,json; t=[x for x in json.load(sys.stdin)['data']['activeTargets'] if x['labels'].get('job')=='aiq-availabilityiq-api']; print(t[0]['health'] if t else 'absent')")
+            echo "target health: $health"
+            [ "$health" = "up" ] && break
+            sleep 5
+          done
+          [ "$health" = "up" ]
+          curl -s localhost:9090/api/v1/rules | python3 -c "import sys,json; g={x['name'] for x in json.load(sys.stdin)['data']['groups']}; print(sorted(g)); assert {'availabilityiq-api','availabilityiq-scoring'} <= g"
+          curl -s 'localhost:9090/api/v1/query?query=max(aiq_predictions_rows)' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; print(r); assert r and float(r[0]['value'][1]) == 216"
+          curl -s 'localhost:9090/api/v1/query?query=ALERTS{alertname="AiqPredictionsStale"}' | python3 -c "import sys,json; r=json.load(sys.stdin)['data']['result']; assert not r, r; print('no stale alert, as expected')"
+      - name: A second publish is picked up without a restart
+        run: |
+          kubectl -n aiq create job --from=cronjob/aiq-availabilityiq-scoring score-again
+          kubectl -n aiq wait --for=condition=complete job/score-again --timeout=300s
+          sleep 5
+          curl -fsS localhost:8000/metrics | grep -E '^aiq_predictions_reloads_total\{result="ok"\} 2'
+          curl -fsS localhost:8000/v1/model | grep -q '"rows": *216'
+      - name: Dump the cluster on failure
+        if: failure()
+        run: |
+          kubectl get all -A
+          kubectl -n aiq describe pods
+          kubectl -n aiq logs deploy/aiq-availabilityiq-api --tail=200 || true
+          kubectl -n aiq logs deploy/aiq-availabilityiq-ui --tail=100 || true
+          kubectl -n aiq get events --sort-by=.lastTimestamp | tail -40
+
+  release:
+    name: publish the chart
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [e2e, terraform]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Package and push the chart to GHCR
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package deploy/chart/availabilityiq -d /tmp/chart
+          helm push /tmp/chart/availabilityiq-*.tgz "oci://ghcr.io/${owner}/charts"
