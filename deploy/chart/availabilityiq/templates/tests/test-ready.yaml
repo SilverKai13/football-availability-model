@@ -1,0 +1,37 @@
+# `helm test <release>`: the API is ready and answers a squad question.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "aiq.fullname" . }}-test-ready
+  labels:
+    {{- include "aiq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  securityContext:
+    {{- toYaml .Values.podSecurityContext | nindent 4 }}
+  containers:
+    - name: check
+      image: {{ include "aiq.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext:
+        {{- toYaml .Values.containerSecurityContext | nindent 8 }}
+      command:
+        - sh
+        - -ec
+        - |
+          base="http://{{ include "aiq.fullname" . }}-api:{{ .Values.api.service.port }}"
+          curl -fsS "$base/ready"
+          curl -fsS "$base/v1/model" | grep -q '"rows"'
+          team=$(curl -fsS "$base/v1/teams" | sed -n 's/.*"team_id": *\([0-9]*\).*/\1/p' | head -1)
+          curl -fsS "$base/v1/squads/$team/risk" | grep -q '"players"'
+          echo "ok: team $team answers"
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+  volumes:
+    - name: tmp
+      emptyDir: {}

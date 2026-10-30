@@ -1,0 +1,73 @@
+# A production-shaped values file for the EKS footprint in deploy/terraform/aws.
+# Copy, fill in the account-specific parts, keep it out of the repository if it
+# ends up holding anything private.
+image:
+  tag: "0.2.0"
+
+serviceAccount:
+  annotations:
+    # The role deploy/terraform/aws creates for reading and writing the artefact bucket.
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/availabilityiq-scoring
+
+artifacts:
+  persistence:
+    # EFS: every node can mount it, so replicas and the job can be anywhere.
+    storageClass: efs-sc
+    accessModes:
+      - ReadWriteMany
+    size: 5Gi
+
+api:
+  replicas: 3
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+
+scoring:
+  corpus:
+    existingClaim: availabilityiq-corpus
+  envFrom:
+    - secretRef:
+        name: availabilityiq-scoring   # SPORTMONKS_TOKEN and friends; created outside the chart
+
+ingress:
+  enabled: true
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:eu-west-2:123456789012:certificate/replace-me
+  hosts:
+    - host: aiq.internal.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+          service: api
+        - path: /ui
+          pathType: Prefix
+          service: ui
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kube-prometheus-stack
+  grafanaDashboard:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    # The AWS load balancer controller reaches pods directly (target-type ip);
+    # allow the VPC CIDR the ALB sits in.
+    - ipBlock:
+        cidr: 10.0.0.0/16

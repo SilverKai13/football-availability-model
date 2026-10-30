@@ -1,0 +1,15 @@
+{{- if .Values.monitoring.prometheusRule.enabled }}
+# The rules live in files/alerts.yaml so promtool can check and unit-test them
+# as a plain file; this wraps the same text in the operator's CRD.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "aiq.fullname" . }}
+  labels:
+    {{- include "aiq.labels" . | nindent 4 }}
+    {{- with .Values.monitoring.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- .Files.Get "files/alerts.yaml" | nindent 2 }}
+{{- end }}

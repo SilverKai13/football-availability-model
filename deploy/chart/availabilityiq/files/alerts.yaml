@@ -1,0 +1,111 @@
+# Alert rules for the API and the weekly scoring job. Checked by promtool and
+# unit-tested in alerts_test.yaml; the chart wraps this file in a PrometheusRule.
+# Every alert links to deploy/RUNBOOK.md under its own name.
+groups:
+  - name: availabilityiq-api
+    rules:
+      - alert: AiqApiDown
+        expr: up{job=~".*availabilityiq.*api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: The AvailabilityIQ API is not being scraped
+          description: Prometheus cannot reach the API's /metrics in namespace {{ $labels.namespace }}.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapidown
+
+      - alert: AiqApiNoTargets
+        expr: absent(up{job=~".*availabilityiq.*api"})
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: No AvailabilityIQ API target exists
+          description: The ServiceMonitor matches no endpoints; the deployment or the service is gone.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapinotargets
+
+      - alert: AiqApiNotReady
+        expr: max by (namespace) (aiq_predictions_loaded) == 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: The API has no valid predictions loaded
+          description: Every replica in {{ $labels.namespace }} reports no predictions file; readiness is failing and no traffic is served.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapinotready
+
+      - alert: AiqPredictionsStale
+        expr: max by (namespace) (aiq_predictions_age_seconds) > 8 * 24 * 3600
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: The served predictions are more than eight days old
+          description: The weekly job has not published for over a week in {{ $labels.namespace }}; physios are reading last week's numbers.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqpredictionsstale
+
+      - alert: AiqApiErrorRateHigh
+        expr: |
+          sum by (namespace) (rate(aiq_http_requests_total{status=~"5.."}[5m]))
+            / sum by (namespace) (rate(aiq_http_requests_total[5m])) > 0.02
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 2% of API requests are failing
+          description: Server errors over the last five minutes exceed 2% of requests in {{ $labels.namespace }}.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapierrorratehigh
+
+      - alert: AiqApiLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum by (namespace, le) (rate(aiq_http_request_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: API p95 latency is above 500 ms
+          description: The 95th percentile of request latency has been above half a second for ten minutes in {{ $labels.namespace }}.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapilatencyhigh
+
+      - alert: AiqPredictionsReloadFailed
+        expr: sum by (namespace) (increase(aiq_predictions_reloads_total{result="failed"}[1h])) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: A published predictions file could not be loaded
+          description: The API found a new manifest in {{ $labels.namespace }} but the file failed the contract; it is still serving the previous predictions.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqpredictionsreloadfailed
+
+  - name: availabilityiq-scoring
+    rules:
+      - alert: AiqScoringJobFailed
+        expr: max by (namespace, job_name) (kube_job_status_failed{job_name=~".*availabilityiq.*scoring.*"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: A weekly scoring run failed
+          description: Job {{ $labels.job_name }} in {{ $labels.namespace }} failed. The previously published predictions are still being served.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqscoringjobfailed
+
+      - alert: AiqScoringNotRunning
+        expr: |
+          time() - max by (namespace) (kube_cronjob_status_last_successful_time{cronjob=~".*availabilityiq.*scoring"}) > 8 * 24 * 3600
+        for: 1h
+        labels:
+          severity: critical
+        annotations:
+          summary: The weekly scoring job has not succeeded in over eight days
+          description: No successful run of the scoring CronJob in {{ $labels.namespace }} for more than a week.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqscoringnotrunning
+
+      - alert: AiqScoringRunningTooLong
+        expr: max by (namespace, job_name) (kube_job_status_active{job_name=~".*availabilityiq.*scoring.*"}) > 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: A scoring run has been active for over two hours
+          description: Job {{ $labels.job_name }} in {{ $labels.namespace }} is still running; a normal run finishes well inside the hour.
+          runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqscoringrunningtoolong

@@ -1,0 +1,14 @@
+{{ .Chart.Name }} {{ .Chart.Version }} is installed as {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+The API answers at {{ include "aiq.fullname" . }}-api:{{ .Values.api.service.port }}:
+  /ready        503 until the weekly job has published predictions
+  /v1/model     what is loaded and what it cannot see
+  /v1/squads/{team_id}/risk?week=YYYY-MM-DD
+{{- if .Values.ui.enabled }}
+The squad page is at {{ include "aiq.fullname" . }}-ui:{{ .Values.ui.service.port }}.
+{{- end }}
+{{- if .Values.scoring.enabled }}
+The scoring job runs on "{{ .Values.scoring.schedule }}" ({{ .Values.scoring.timeZone }}).
+Run it now:  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "aiq.fullname" . }}-scoring score-now
+{{- end }}
+Check it:    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

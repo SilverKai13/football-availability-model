@@ -1,0 +1,20 @@
+apiVersion: v2
+name: availabilityiq
+description: >-
+  Seven-day player unavailability risk, served from a weekly predictions table.
+  An API and a squad page over one shared artefact volume, a scheduled scoring job
+  that publishes into it, and the monitoring that says when it stopped.
+type: application
+version: 0.2.0
+appVersion: "0.2.0"
+kubeVersion: ">=1.27.0-0"
+keywords:
+  - football
+  - availability
+  - batch-scoring
+  - fastapi
+home: https://github.com/SilverKai13/football-availability-model
+sources:
+  - https://github.com/SilverKai13/football-availability-model
+maintainers:
+  - name: Hrishikesh Handique

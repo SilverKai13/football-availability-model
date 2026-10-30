@@ -1,0 +1,20 @@
+{{- if and .Values.artifacts.persistence.enabled (not .Values.artifacts.persistence.existingClaim) }}
+# The hand-off between the scoring job and the readers. The job writes
+# predictions.parquet and manifest.json here; the API and the page mount it
+# read-only and reload when the manifest changes.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "aiq.artifactsClaim" . }}
+  labels:
+    {{- include "aiq.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.artifacts.persistence.accessModes | nindent 4 }}
+  {{- with .Values.artifacts.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.artifacts.persistence.size }}
+{{- end }}

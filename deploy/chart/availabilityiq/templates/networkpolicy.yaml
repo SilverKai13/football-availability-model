@@ -1,0 +1,59 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $labels := include "aiq.labels" . }}
+# Readers accept traffic from this namespace and from the peers listed in
+# values (the ingress controller, Prometheus); they talk to nothing but DNS.
+# The scoring job accepts nothing and may reach out: the export stage fetches.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aiq.fullname" . }}-readers
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/instance
+        operator: In
+        values: [{{ .Release.Name | quote }}]
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, ui]
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+        {{- with .Values.networkPolicy.ingressFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - port: 8000
+          protocol: TCP
+        - port: 8501
+          protocol: TCP
+  egress:
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "aiq.fullname" . }}-scoring
+  labels:
+    {{- $labels | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: scoring
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: []
+  egress:
+    - {}
+{{- end }}

@@ -1,0 +1,67 @@
+# Values for the kind cluster in CI: one node, the image loaded from the build,
+# monitoring on so the ServiceMonitor and the rules are exercised for real.
+image:
+  tag: ci
+  pullPolicy: Never
+
+artifacts:
+  persistence:
+    size: 100Mi
+
+api:
+  replicas: 1
+  autoscaling:
+    enabled: false
+  podDisruptionBudget:
+    enabled: false
+  topologySpread: false
+  reloadSeconds: 2
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+ui:
+  enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 192Mi
+    limits:
+      memory: 768Mi
+
+scoring:
+  enabled: true
+  # The smoke run publishes synthetic artefacts; the real command needs the corpus.
+  command:
+    - sh
+    - -c
+    - aiq smoke-data --out /tmp/smoke && cp /tmp/smoke/teams.parquet /srv/artifacts/ && aiq publish --source /tmp/smoke --destination /srv/artifacts
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+monitoring:
+  serviceMonitor:
+    enabled: true
+    interval: 5s
+    labels:
+      release: kps
+  prometheusRule:
+    enabled: true
+    labels:
+      release: kps
+  grafanaDashboard:
+    enabled: true
+
+networkPolicy:
+  enabled: true
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring

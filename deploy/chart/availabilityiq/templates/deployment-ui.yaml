@@ -1,0 +1,103 @@
+{{- if .Values.ui.enabled }}
+{{- $selector := include "aiq.selectorLabels" (dict "root" . "component" "ui") }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "aiq.fullname" . }}-ui
+  labels:
+    {{- include "aiq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: ui
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- $selector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "aiq.labels" . | nindent 8 }}
+        app.kubernetes.io/component: ui
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "aiq.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ui
+          image: {{ include "aiq.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - streamlit
+            - run
+            - app/streamlit_app.py
+            - --server.port=8501
+            - --server.address=0.0.0.0
+            - --server.headless=true
+            - --browser.gatherUsageStats=false
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: AIQ_ARTIFACT_DIR
+              value: /srv/artifacts
+            - name: AIQ_TEAMS_PATH
+              value: {{ .Values.artifacts.teamsPath | quote }}
+            - name: HOME
+              value: /home/aiq
+          ports:
+            - name: http
+              containerPort: 8501
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 40
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          volumeMounts:
+            - name: artifacts
+              mountPath: /srv/artifacts
+              readOnly: true
+            - name: home
+              mountPath: /home/aiq
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: artifacts
+          {{- if .Values.artifacts.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "aiq.artifactsClaim" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: home
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,108 @@
+{{- if .Values.scoring.enabled }}
+# The weekly run. Every stage writes to disk and publish is last, so a failure
+# anywhere leaves the previously published predictions untouched. One run at a
+# time; a run that is still going when the next is due is a problem to look at,
+# not something to pile onto.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "aiq.fullname" . }}-scoring
+  labels:
+    {{- include "aiq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scoring
+spec:
+  schedule: {{ .Values.scoring.schedule | quote }}
+  {{- with .Values.scoring.timeZone }}
+  timeZone: {{ . | quote }}
+  {{- end }}
+  concurrencyPolicy: {{ .Values.scoring.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.scoring.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.scoring.failedJobsHistoryLimit }}
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    metadata:
+      labels:
+        {{- include "aiq.labels" . | nindent 8 }}
+        app.kubernetes.io/component: scoring
+    spec:
+      backoffLimit: {{ .Values.scoring.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.scoring.activeDeadlineSeconds }}
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            {{- include "aiq.labels" . | nindent 12 }}
+            app.kubernetes.io/component: scoring
+        spec:
+          restartPolicy: Never
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "aiq.serviceAccountName" . }}
+          automountServiceAccountToken: false
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: scoring
+              image: {{ include "aiq.image" . | quote }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command:
+                {{- toYaml .Values.scoring.command | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.containerSecurityContext | nindent 16 }}
+              env:
+                - name: AIQ_VERSION
+                  value: {{ include "aiq.imageTag" . | quote }}
+                - name: HOME
+                  value: /home/aiq
+                {{- with .Values.scoring.env }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+              {{- with .Values.scoring.envFrom }}
+              envFrom:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              resources:
+                {{- toYaml .Values.scoring.resources | nindent 16 }}
+              volumeMounts:
+                - name: artifacts
+                  mountPath: /srv/artifacts
+                - name: work
+                  mountPath: /app/artifacts
+                - name: data
+                  mountPath: {{ .Values.scoring.corpus.mountPath }}
+                - name: home
+                  mountPath: /home/aiq
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: artifacts
+              {{- if .Values.artifacts.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "aiq.artifactsClaim" . }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: work
+              emptyDir: {}
+            - name: data
+              {{- if .Values.scoring.corpus.existingClaim }}
+              persistentVolumeClaim:
+                claimName: {{ .Values.scoring.corpus.existingClaim }}
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+            - name: home
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

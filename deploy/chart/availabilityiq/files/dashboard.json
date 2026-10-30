@@ -1,0 +1,141 @@
+{
+  "title": "AvailabilityIQ",
+  "uid": "availabilityiq",
+  "tags": ["availabilityiq"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "label": "Prometheus",
+        "current": {}
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${datasource}"},
+        "query": "label_values(aiq_predictions_loaded, namespace)",
+        "refresh": 2,
+        "includeAll": false,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Predictions age",
+      "gridPos": {"x": 0, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "max(aiq_predictions_age_seconds{namespace=\"$namespace\"})"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [
+        {"color": "green", "value": null}, {"color": "orange", "value": 604800}, {"color": "red", "value": 691200}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 2, "type": "stat", "title": "Player-weeks served",
+      "gridPos": {"x": 4, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "max(aiq_predictions_rows{namespace=\"$namespace\"})"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none", "graphMode": "none"}
+    },
+    {
+      "id": 3, "type": "stat", "title": "Replicas with predictions loaded",
+      "gridPos": {"x": 8, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum(aiq_predictions_loaded{namespace=\"$namespace\"})"}],
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [
+        {"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 4, "type": "stat", "title": "Requests / s",
+      "gridPos": {"x": 12, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum(rate(aiq_http_requests_total{namespace=\"$namespace\"}[5m]))"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "none", "graphMode": "area"}
+    },
+    {
+      "id": 5, "type": "stat", "title": "Error rate (5m)",
+      "gridPos": {"x": 16, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum(rate(aiq_http_requests_total{namespace=\"$namespace\",status=~\"5..\"}[5m])) / sum(rate(aiq_http_requests_total{namespace=\"$namespace\"}[5m]))"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"mode": "absolute", "steps": [
+        {"color": "green", "value": null}, {"color": "orange", "value": 0.01}, {"color": "red", "value": 0.02}]}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"]}, "colorMode": "background", "graphMode": "none"}
+    },
+    {
+      "id": 6, "type": "stat", "title": "Model version",
+      "gridPos": {"x": 20, "y": 0, "w": 4, "h": 4},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "max by (version) (aiq_model_info{namespace=\"$namespace\"})", "legendFormat": "{{version}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}, "textMode": "name", "colorMode": "none", "graphMode": "none"}
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Requests by status",
+      "gridPos": {"x": 0, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum by (status) (rate(aiq_http_requests_total{namespace=\"$namespace\"}[5m]))", "legendFormat": "{{status}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Latency p50 / p95 / p99",
+      "gridPos": {"x": 12, "y": 4, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(aiq_http_request_seconds_bucket{namespace=\"$namespace\"}[5m])))", "legendFormat": "p50"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(aiq_http_request_seconds_bucket{namespace=\"$namespace\"}[5m])))", "legendFormat": "p95"},
+        {"refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(aiq_http_request_seconds_bucket{namespace=\"$namespace\"}[5m])))", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Requests by route",
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum by (route) (rate(aiq_http_requests_total{namespace=\"$namespace\"}[5m]))", "legendFormat": "{{route}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Predictions age",
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "max(aiq_predictions_age_seconds{namespace=\"$namespace\"})", "legendFormat": "age"}],
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [
+        {"color": "green", "value": null}, {"color": "red", "value": 691200}]}, "custom": {"thresholdsStyle": {"mode": "line"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Predictions reloads",
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [{"refId": "A", "expr": "sum by (result) (increase(aiq_predictions_reloads_total{namespace=\"$namespace\"}[1h]))", "legendFormat": "{{result}}"}],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Scoring job: hours since last success, active runs, failures",
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 7},
+      "datasource": {"type": "prometheus", "uid": "${datasource}"},
+      "targets": [
+        {"refId": "A", "expr": "(time() - max(kube_cronjob_status_last_successful_time{namespace=\"$namespace\",cronjob=~\".*scoring\"})) / 3600", "legendFormat": "hours since last success"},
+        {"refId": "B", "expr": "sum(kube_job_status_active{namespace=\"$namespace\",job_name=~\".*scoring.*\"})", "legendFormat": "active"},
+        {"refId": "C", "expr": "sum(kube_job_status_failed{namespace=\"$namespace\",job_name=~\".*scoring.*\"})", "legendFormat": "failed"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    }
+  ]
+}

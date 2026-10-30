@@ -1,0 +1,106 @@
+# Unit tests for alerts.yaml: `promtool test rules alerts_test.yaml`.
+# Each case feeds a series and asks whether the alert fires when it should,
+# and stays quiet when it should not.
+rule_files:
+  - alerts.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: stale predictions fire after eight days, fresh ones do not
+    input_series:
+      - series: 'aiq_predictions_age_seconds{namespace="aiq", pod="api-a"}'
+        values: '700000+60x60'
+      - series: 'aiq_predictions_age_seconds{namespace="fresh", pod="api-b"}'
+        values: '3600+60x60'
+    alert_rule_test:
+      - eval_time: 31m
+        alertname: AiqPredictionsStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: aiq
+            exp_annotations:
+              summary: The served predictions are more than eight days old
+              description: The weekly job has not published for over a week in aiq; physios are reading last week's numbers.
+              runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqpredictionsstale
+      - eval_time: 20m
+        alertname: AiqPredictionsStale
+        exp_alerts: []
+
+  - interval: 1m
+    name: a scraped target that answers down for two minutes pages
+    input_series:
+      - series: 'up{job="aiq-availabilityiq-api", namespace="aiq", instance="10.0.0.1:8000"}'
+        values: '1 1 1 0 0 0 0 0'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: AiqApiDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: AiqApiDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: aiq-availabilityiq-api
+              namespace: aiq
+              instance: 10.0.0.1:8000
+            exp_annotations:
+              summary: The AvailabilityIQ API is not being scraped
+              description: Prometheus cannot reach the API's /metrics in namespace aiq.
+              runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapidown
+
+  - interval: 1m
+    name: error rate above two percent for ten minutes
+    input_series:
+      - series: 'aiq_http_requests_total{namespace="aiq", route="/v1/squads/{team_id}/risk", method="GET", status="200"}'
+        values: '0+100x30'
+      - series: 'aiq_http_requests_total{namespace="aiq", route="/v1/squads/{team_id}/risk", method="GET", status="500"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: AiqApiErrorRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: aiq
+            exp_annotations:
+              summary: More than 2% of API requests are failing
+              description: Server errors over the last five minutes exceed 2% of requests in aiq.
+              runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapierrorratehigh
+
+  - interval: 1m
+    name: a replica with nothing loaded for ten minutes
+    input_series:
+      - series: 'aiq_predictions_loaded{namespace="aiq", pod="api-a"}'
+        values: '0x15'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AiqApiNotReady
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: aiq
+            exp_annotations:
+              summary: The API has no valid predictions loaded
+              description: Every replica in aiq reports no predictions file; readiness is failing and no traffic is served.
+              runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqapinotready
+
+  - interval: 1m
+    name: a failed scoring job is a warning after five minutes
+    input_series:
+      - series: 'kube_job_status_failed{namespace="aiq", job_name="aiq-availabilityiq-scoring-29300000"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: AiqScoringJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: aiq
+              job_name: aiq-availabilityiq-scoring-29300000
+            exp_annotations:
+              summary: A weekly scoring run failed
+              description: Job aiq-availabilityiq-scoring-29300000 in aiq failed. The previously published predictions are still being served.
+              runbook: https://github.com/SilverKai13/football-availability-model/blob/master/deploy/RUNBOOK.md#aiqscoringjobfailed
