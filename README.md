@@ -160,7 +160,7 @@ Checks:
   python -m mypy src tests
   python -m pytest
 
-67 tests. The ones I care about are the leakage tests: moving the as-of date
+97 tests. The ones I care about are the leakage tests: moving the as-of date
 forward changes every rolling feature, no feature reads anything after its
 cutoff, no already-absent row carries a label, and the calibrator never sees
 a test season.
@@ -180,3 +180,31 @@ Layout
   src/aiq/sensitivity.py  the two sensitivity checks
   src/aiq/cli.py          command line entry points
   app/streamlit_app.py    squad risk page
+
+Running it in production
+------------------------
+
+The model is a weekly batch, so the production setup serves a weekly table:
+a scheduled job runs the pipeline and publishes the predictions file with a
+manifest; an API and the squad page read it; Prometheus alerts when the file
+stops arriving. Everything is under deploy/:
+
+- deploy/README.md       how the pieces fit, the API, the publish hand-off,
+                         what CI verifies on a real (kind) cluster and what
+                         it cannot
+- deploy/chart/          the Helm chart, alert rules with unit tests, the
+                         Grafana dashboard
+- deploy/terraform/aws/  the AWS footprint (EKS, EFS, S3, Pod Identity),
+                         validated and linted but deliberately not applied
+- deploy/RUNBOOK.md      one entry per alert
+- deploy/SLO.md          what is promised and what is not
+- deploy/DECISIONS.md    the choices and their costs
+
+Quick look, with synthetic data and no corpus:
+
+    aiq smoke-data --out artifacts/smoke
+    aiq publish --source artifacts/smoke --destination artifacts/published
+    cp artifacts/smoke/teams.parquet artifacts/published/
+    AIQ_ARTIFACT_DIR=artifacts/published AIQ_TEAMS_PATH=artifacts/published/teams.parquet aiq-api
+
+Then http://localhost:8000/v1/squads/1000/risk and /v1/model.
