@@ -1,6 +1,6 @@
 [project]
 name = "availabilityiq"
-version = "0.1.0"
+version = "0.2.0"
 description = "Seven-day player unavailability risk, calibrated and honestly validated."
 requires-python = ">=3.13"
 dependencies = [
@@ -12,7 +12,15 @@ dependencies = [
     "httpx==0.28.1",
     "streamlit==1.57.0",
     "typer==0.25.1",
+    "fastapi==0.162.0",
+    "uvicorn[standard]==0.54.0",
+    "prometheus-client==0.26.0",
+    "pydantic-settings==2.16.2",
 ]
+
+[project.scripts]
+aiq = "aiq.cli:main"
+aiq-api = "aiq.serve.main:run"
 
 [project.optional-dependencies]
 dev = ["pytest==9.0.3", "ruff==0.15.20", "mypy==1.18.2"]
@@ -45,7 +53,16 @@ plugins = []
 # DataFrame expressions. Treat the data libraries as untyped and keep the gate on our
 # own logic. Recorded as D-014.
 [[tool.mypy.overrides]]
-module = ["pandas.*", "sklearn.*", "shap.*", "streamlit.*", "pyarrow.*", "numpy.*", "yaml.*"]
+module = [
+    "pandas.*",
+    "sklearn.*",
+    "shap.*",
+    "streamlit.*",
+    "pyarrow.*",
+    "numpy.*",
+    "yaml.*",
+    "matplotlib.*",
+]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

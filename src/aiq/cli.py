@@ -4,10 +4,12 @@ Each stage writes its output to disk, so you can rerun one without redoing the
 ones before it. Only "export" touches the database or the network.
 """
 
+import os
 import sys
 import warnings
 from collections.abc import Callable
 from pathlib import Path
+from typing import Annotated
 
 import numpy as np
 import pandas as pd
@@ -33,6 +35,10 @@ INTERIM = Path("data/interim")
 PANEL = Path("data/panel")
 FEATURES = Path("data/features")
 ARTIFACTS = Path("artifacts")
+#: Where `publish` installs predictions and the API reads them; a shared volume on a cluster.
+PUBLISHED = Path("artifacts/published")
+#: Recorded in the manifest; the image build sets it to the git sha.
+DEFAULT_VERSION = os.environ.get("AIQ_VERSION", "dev")
 
 # Leagues carried into modelling. Championship and ISL excluded on
 # Transfermarkt reporting depth, not on anything about the football.
@@ -376,6 +382,98 @@ def report() -> None:
         if name in honest.index and name in naive.index:
             gap = (naive.loc[name].pr_auc - honest.loc[name].pr_auc) / honest.loc[name].pr_auc
             typer.echo(f"  {name:22s} {gap:+.1%}")
+
+
+@app.command()
+def publish(
+    source: Annotated[
+        Path, typer.Option(help="Directory holding predictions.parquet.")
+    ] = ARTIFACTS,
+    destination: Annotated[
+        Path, typer.Option(help="Where the API reads; a shared volume on a cluster.")
+    ] = PUBLISHED,
+    version: Annotated[str, typer.Option(help="Recorded in the manifest.")] = DEFAULT_VERSION,
+    keep: Annotated[int, typer.Option(help="Previous versions kept under history/.")] = 3,
+) -> None:
+    """Validate the scored predictions and install them where the API reads them."""
+    from aiq.serve.publish import PublishError
+    from aiq.serve.publish import publish as do_publish
+
+    try:
+        manifest = do_publish(source, destination, version=version, keep=keep)
+    except PublishError as exc:
+        typer.echo(f"refused: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(
+        f"published {manifest.rows:,} player-weeks ({manifest.weeks_from} -> {manifest.weeks_to}) "
+        f"to {destination}  version {manifest.version}  sha256 {manifest.sha256[:12]}"
+    )
+
+
+@app.command()
+def rollback(
+    destination: Annotated[Path, typer.Option(help="The published directory.")] = PUBLISHED,
+) -> None:
+    """Reinstate the previous published predictions."""
+    from aiq.serve.publish import PublishError
+    from aiq.serve.publish import rollback as do_rollback
+
+    try:
+        manifest = do_rollback(destination)
+    except PublishError as exc:
+        typer.echo(f"refused: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    typer.echo(f"rolled back to the predictions published {manifest.published_at}")
+
+
+@app.command("smoke-data")
+def smoke_data(
+    out: Annotated[Path, typer.Option(help="Directory to write into.")] = Path("artifacts/smoke"),
+    teams: Annotated[int, typer.Option()] = 3,
+    weeks: Annotated[int, typer.Option()] = 4,
+) -> None:
+    """Write synthetic artefacts that pass the contract, for deployment smoke checks."""
+    from aiq.serve.fixtures import write_synthetic_artifacts
+
+    frame = write_synthetic_artifacts(out, teams=teams, weeks=weeks)
+    typer.echo(f"wrote {len(frame):,} synthetic player-weeks to {out} (no real players)")
+
+
+@app.command()
+def weekly(
+    destination: Annotated[
+        Path, typer.Option(help="Where the API reads; a shared volume on a cluster.")
+    ] = PUBLISHED,
+    skip_export: Annotated[
+        bool, typer.Option(help="Start from the panel; data/raw is already current.")
+    ] = False,
+    with_metrics: Annotated[
+        bool, typer.Option(help="Also refit every model for metrics.parquet.")
+    ] = False,
+    version: Annotated[str, typer.Option(help="Recorded in the manifest.")] = DEFAULT_VERSION,
+) -> None:
+    """The scheduled run: export, crosswalk, panel, features, predict, publish.
+
+    Each stage writes to disk, so a failure leaves the published predictions as
+    they were: publish is the last step and refuses anything that fails the contract.
+    """
+    import time
+
+    stages: list[tuple[str, Callable[[], None]]] = []
+    if not skip_export:
+        stages.append(("export", export))
+        stages.append(("xwalk", lambda: xwalk(audit=False)))
+        stages.append(("categories", categories))
+    stages += [("panel", panel), ("features", features)]
+    if with_metrics:
+        stages.append(("train", lambda: train(label="label_injury")))
+    stages.append(("predict", predict))
+    for name, stage in stages:
+        started = time.perf_counter()
+        typer.echo(f"== {name}")
+        stage()
+        typer.echo(f"== {name} done in {time.perf_counter() - started:,.0f}s")
+    publish(source=ARTIFACTS, destination=destination, version=version, keep=3)
 
 
 def main() -> None:

@@ -4,13 +4,16 @@ Two rules I tried to stick to: always show the base rate next to a probability,
 and put what the model cannot do on the page rather than hiding it in a readme.
 """
 
+import os
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-PREDICTIONS = Path("artifacts/predictions.parquet")
-TEAMS = Path("data/raw/teams.parquet")
+# The same two files the API serves. On a cluster both read the shared volume.
+ARTIFACT_DIR = Path(os.environ.get("AIQ_ARTIFACT_DIR", "artifacts"))
+PREDICTIONS = ARTIFACT_DIR / "predictions.parquet"
+TEAMS = Path(os.environ.get("AIQ_TEAMS_PATH", "data/raw/teams.parquet"))
 
 # Shortlist length, matching the precision@5 reported in the README.
 SHORTLIST = 5
@@ -51,7 +54,7 @@ READABLE = {
 @st.cache_data
 def load() -> tuple[pd.DataFrame, dict[int, str]]:
     if not PREDICTIONS.exists():
-        st.error("artifacts/predictions.parquet not found. Run: python -m aiq.cli predict")
+        st.error(f"{PREDICTIONS} not found. Run: python -m aiq.cli predict")
         st.stop()
     frame = pd.read_parquet(PREDICTIONS)
     frame["monday"] = pd.to_datetime(frame.monday)
